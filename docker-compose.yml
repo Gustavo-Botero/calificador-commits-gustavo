@@ -1,0 +1,52 @@
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: db-ia
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20"]
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD}
+    ports:
+      # Solo localhost. La API no lo necesita (le llega por la red interna),
+      # pero las pruebas de la semana 4 corren en el host y si.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Solo lectura, y solo se ejecuta si el directorio de datos esta vacio.
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [red-ia]
+
+  api:
+    build: .
+    image: api-ia:1.0.0
+    container_name: api-ia
+    env_file: .env
+    environment:
+      # Dentro de la red de Compose los servicios se resuelven por nombre.
+      DB_HOST: db
+      # Ollama corre en el host, fuera de los contenedores.
+      OLLAMA_URL: http://host.docker.internal:11434/api/generate
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        # No arranca hasta que pg_isready responda, no solo hasta que el
+        # contenedor exista.
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [red-ia]
+
+volumes:
+  pgdata:
+
+networks:
+  red-ia:
+    driver: bridge
