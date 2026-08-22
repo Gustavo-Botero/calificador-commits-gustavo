@@ -32,3 +32,47 @@ jobs:
 
       - name: Construir la imagen Docker
         run: docker build -t api-ia:ci .
+
+  pruebas:
+    runs-on: ubuntu-latest
+    needs: calidad
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: iadb
+          POSTGRES_PASSWORD: claveCI
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-retries 5
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: iadb
+      # Las pruebas usan el rol de la aplicacion, no el superusuario: asi el
+      # pipeline tambien verifica que los privilegios minimos siguen bastando.
+      DB_USER: app_ia
+      DB_PASSWORD: claveApp456
+      # En el runner no hay Ollama, asi que el motor por defecto debe ser eco.
+      MOTOR_POR_DEFECTO: eco
+    steps:
+      - name: Descargar el codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Crear la tabla y el rol de aplicacion
+        run: psql -h localhost -U postgres -d iadb -f db/init.sql
+        env:
+          PGPASSWORD: claveCI
+
+      - name: Ejecutar las pruebas
+        run: pytest -v
